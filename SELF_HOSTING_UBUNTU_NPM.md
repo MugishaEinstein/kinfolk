@@ -14,7 +14,7 @@ This guide runs Kinfolk as a **Dockerised Node.js application** backed by a priv
 
 ## 1. Prepare the Server and Domain
 
-Point an `A` record such as `family.example.com` to your Ubuntu server’s public IPv4 address. If you use IPv6, add the matching `AAAA` record. NPM’s own guidance expects ports 80 and 443 to reach the proxy host, with the domain pointing at the server hosting it.[1]
+Point the `A` record for `chat.nostr.africa` to your Ubuntu server’s public IPv4 address. If your server accepts IPv6 traffic, add the matching `AAAA` record as well. NPM’s own guidance expects ports 80 and 443 to reach the proxy host, with the domain pointing at the server hosting it.[1]
 
 On the Ubuntu server, install Docker Engine and the Docker Compose plugin using Docker’s current official installation instructions. Then permit only SSH, HTTP, and HTTPS at the firewall; keep both the database and NPM’s administrative port off the public internet.
 
@@ -214,7 +214,7 @@ In NPM, create a new **Proxy Host** with the following settings. When both conta
 
 | NPM field | Value |
 |---|---|
-| Domain Names | `family.example.com` |
+| Domain Names | `chat.nostr.africa` |
 | Scheme | `http` |
 | Forward Hostname / IP | `kinfolk` |
 | Forward Port | `3000` |
@@ -235,11 +235,11 @@ cd /opt/kinfolk
 docker compose ps
 docker compose logs --tail=100 kinfolk
 
-curl -I https://family.example.com
-curl -sS https://family.example.com/api/trpc/system.health | head
+curl -I https://chat.nostr.africa
+curl -sS https://chat.nostr.africa/api/trpc/system.health | head
 ```
 
-Open `https://family.example.com` in a browser. Before you invite people or upload personal records, complete the OAuth and storage portability work described at the beginning of this guide. Treat the running version as a deployment smoke test until then.
+Open `https://chat.nostr.africa` in a browser. Before you invite people or upload personal records, complete the OAuth and storage portability work described at the beginning of this guide. Treat the running version as a deployment smoke test until then.
 
 ## 6. Updates, Backups, and Recovery
 

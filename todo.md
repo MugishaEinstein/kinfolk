@@ -13,3 +13,4 @@
 - [x] Add automated tests for essential family-domain procedures and manually verify essential UI behaviors.
 - [x] Verify type safety, test results, desktop/mobile presentation, and create the final project checkpoint.
 - [x] Prepare a deployment guide for running Kinfolk on an Ubuntu server behind Nginx Proxy Manager.
+- [x] Tailor the Ubuntu and Nginx Proxy Manager deployment instructions to chat.nostr.africa.
