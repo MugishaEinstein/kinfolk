@@ -26,3 +26,6 @@
 - [x] Add real passkey-account invitation acceptance, council review, and secure attachment upload interfaces.
 - [x] Add route-level coverage for invitation acceptance, attachment authorization, encrypted message publishing, and relay-backed synchronization; verify browser access routes and protection states.
 - [x] Document the important Kinfolk pages, passkey access, membership approvals, file attachments, and private chat workflow.
+- [x] Verify and document the production deployment steps required to bring wss://relay.nostr.africa online.
+- [x] Replace the hard-coded private-relay dashboard status with a live verified relay health state.
+- [x] Confirm that relay.nostr.africa is publicly reachable and advertises a Nostr information document.

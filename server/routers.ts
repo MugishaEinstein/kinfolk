@@ -11,6 +11,7 @@ import { getRelayPublisherIdentity } from "./relayBoundary";
 import { finishPasskeyAuthentication, finishPasskeyRegistration, startPasskeyAuthentication, startPasskeyRegistration } from "./webauthn";
 import { getMessageEncryptionStatus } from "./messageCrypto";
 import { encryptFamilyMessage } from "./messageCrypto";
+import { getRelayHealth } from "./relayHealth";
 
 export const appRouter = router({
   system: systemRouter,
@@ -22,6 +23,7 @@ export const appRouter = router({
       if (!origin.startsWith("https://")) throw new Error("Kinfolk production endpoints must use secure protocols");
       return { ...getRelayPublisherIdentity(), rpId, origin, messageEncryption: getMessageEncryptionStatus() };
     }),
+    health: publicProcedure.query(() => getRelayHealth()),
   }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
