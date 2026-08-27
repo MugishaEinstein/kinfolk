@@ -15,6 +15,20 @@
       "when": 1787783381243,
       "tag": "0001_graceful_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787811985392,
+      "tag": "0002_colorful_matthew_murdock",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787813516157,
+      "tag": "0003_dashing_bromley",
+      "breakpoints": true
     }
   ]
 }

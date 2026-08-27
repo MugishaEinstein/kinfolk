@@ -3,17 +3,21 @@ import type { TrpcContext } from "./_core/context";
 
 const dbMocks = vi.hoisted(() => ({
   createFamilyWithFounder: vi.fn(),
+  acceptFamilyInvitation: vi.fn(),
   createOpaqueMessage: vi.fn(),
   getFamilyDashboard: vi.fn(),
   getMembership: vi.fn(),
+  getRoomMessages: vi.fn(),
   createFamilyInvitation: vi.fn(),
+  getCouncilMemberCount: vi.fn(),
   createGovernanceProposal: vi.fn(),
   decideInvitation: vi.fn(),
   storeFamilyAttachment: vi.fn(),
+  storeRelayedMessage: vi.fn(),
   voteOnProposal: vi.fn(),
 }));
 
-const relayMocks = vi.hoisted(() => ({ publish: vi.fn() }));
+const relayMocks = vi.hoisted(() => ({ publish: vi.fn(), readRoom: vi.fn() }));
 
 vi.mock("./db", () => dbMocks);
 vi.mock("./relayBoundary", () => ({ privateRelayBoundary: relayMocks }));
@@ -76,14 +80,46 @@ describe("protected Kinfolk router workflows", () => {
     expect(result).toEqual({ message: { id: 92, relayStatus: "queued" }, relayStatus: "queued" });
   });
 
+  it("encrypts real room content before the signed relay publisher and database see it", async () => {
+    dbMocks.getMembership.mockResolvedValue({ id: 31, role: "member" });
+    relayMocks.publish.mockResolvedValue({ status: "published", relayEventId: "relay-55", relayUrl: "wss://relay.nostr.africa" });
+    dbMocks.createOpaqueMessage.mockResolvedValue({ id: 93, relayStatus: "published" });
+    const caller = appRouter.createCaller(context());
+
+    await expect(caller.family.sendMessage({ familyId: 22, roomId: 9, content: "Bring the family album." })).resolves.toMatchObject({ relayStatus: "published", relayEventId: "relay-55" });
+    const relayInput = relayMocks.publish.mock.calls[0]?.[0];
+    expect(relayInput.ciphertext).not.toContain("Bring the family album.");
+    expect(relayInput.ciphertext).toMatch(/^v1\./);
+    expect(dbMocks.createOpaqueMessage).toHaveBeenCalledWith(expect.objectContaining({ relayStatus: "published", relayEventId: "relay-55" }));
+  });
+
   it("requires a council role before a family invitation can be created", async () => {
     dbMocks.getMembership.mockResolvedValue({ id: 31, role: "council" });
+    dbMocks.getCouncilMemberCount.mockResolvedValue(2);
     dbMocks.createFamilyInvitation.mockResolvedValue({ invitation: { id: 3 }, invitationToken: "never-return-this-to-a-log" });
     const caller = appRouter.createCaller(context());
 
     await caller.family.invite({ familyId: 22, inviteeName: "Marin Torres", inviteeEmail: "marin@example.com", membershipType: "external" });
 
     expect(dbMocks.createFamilyInvitation).toHaveBeenCalledWith(expect.objectContaining({ requestedByMemberId: 31, requiredApprovals: 2 }));
+  });
+
+  it("accepts a private invite only for the authenticated passkey account", async () => {
+    dbMocks.acceptFamilyInvitation.mockResolvedValue({ familyId: 22, invitationId: 5, status: "pending_approval" });
+    const caller = appRouter.createCaller(context());
+
+    await expect(caller.family.acceptInvitation({ invitationToken: "a".repeat(64) })).resolves.toEqual({ familyId: 22, invitationId: 5, status: "pending_approval" });
+    expect(dbMocks.acceptFamilyInvitation).toHaveBeenCalledWith({ invitationToken: "a".repeat(64), userId: 7, displayName: "Arthur Calder", email: "arthur@example.com" });
+  });
+
+  it("synchronizes only authenticated family-room events from the private relay", async () => {
+    dbMocks.getMembership.mockResolvedValue({ id: 31, role: "member" });
+    relayMocks.readRoom.mockResolvedValue([{ relayEventId: "relay-1", familyId: 22, roomId: 9, senderMemberId: 31, clientMessageId: "client-1", ciphertext: "v1.iv.tag.payload", encryptionScheme: "opaque", createdAt: new Date() }]);
+    dbMocks.storeRelayedMessage.mockResolvedValue({ stored: true, messageId: 40 });
+    const caller = appRouter.createCaller(context());
+
+    await expect(caller.family.syncRoomFromRelay({ familyId: 22, roomId: 9 })).resolves.toEqual({ received: 1, stored: 1 });
+    expect(dbMocks.storeRelayedMessage).toHaveBeenCalledWith(expect.objectContaining({ relayEventId: "relay-1", authorMemberId: 31, relayUrl: "wss://relay.nostr.africa" }));
   });
 
   it("returns the current member's private family dashboard only through the protected procedure", async () => {

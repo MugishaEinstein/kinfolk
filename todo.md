@@ -14,3 +14,14 @@
 - [x] Verify type safety, test results, desktop/mobile presentation, and create the final project checkpoint.
 - [x] Prepare a deployment guide for running Kinfolk on an Ubuntu server behind Nginx Proxy Manager.
 - [x] Tailor the Ubuntu and Nginx Proxy Manager deployment instructions to chat.nostr.africa.
+- [x] Replace illustrative family-home content with database-backed empty, loading, onboarding, and live-family states.
+- [x] Replace the managed sign-in dependency with a configurable external OpenID Connect identity-provider integration. Decision superseded by device passkeys.
+- [x] Replace the managed sign-in dependency with WebAuthn passkey registration and authentication, without storing biometric data.
+- [x] Implement protected membership, invitation acceptance/review, governance voting, room, and message procedures that persist real member activity.
+- [x] Add real secure attachment upload UI and metadata persistence using the configured storage boundary.
+- [x] Implement a Nostr event adapter with real event creation, signing, relay publication, verification, and subscription handling.
+- [x] Add deployable private-relay configuration and membership-based authorization for wss://relay.nostr.africa.
+- [x] Test real data flow boundaries and prepare the production deployment guide for chat.nostr.africa and relay.nostr.africa.
+- [x] Implement authenticated Nostr subscription handling for wss://relay.nostr.africa and relay-to-database chat synchronization.
+- [x] Add real passkey-account invitation acceptance, council review, and secure attachment upload interfaces.
+- [x] Add route-level coverage for invitation acceptance, attachment authorization, encrypted message publishing, and relay-backed synchronization; verify browser access routes and protection states.
