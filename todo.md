@@ -29,3 +29,4 @@
 - [x] Verify and document the production deployment steps required to bring wss://relay.nostr.africa online.
 - [x] Replace the hard-coded private-relay dashboard status with a live verified relay health state.
 - [x] Confirm that relay.nostr.africa is publicly reachable and advertises a Nostr information document.
+- [x] Diagnose and fix the failed encrypted private-chat message send flow with durable local persistence and explicit relay retry.

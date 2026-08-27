@@ -7,6 +7,7 @@ const dbMocks = vi.hoisted(() => ({
   createOpaqueMessage: vi.fn(),
   getFamilyDashboard: vi.fn(),
   getMembership: vi.fn(),
+  getRetryableRoomMessages: vi.fn(),
   getRoomMessages: vi.fn(),
   createFamilyInvitation: vi.fn(),
   getCouncilMemberCount: vi.fn(),
@@ -14,6 +15,7 @@ const dbMocks = vi.hoisted(() => ({
   decideInvitation: vi.fn(),
   storeFamilyAttachment: vi.fn(),
   storeRelayedMessage: vi.fn(),
+  updateMessageRelayDelivery: vi.fn(),
   voteOnProposal: vi.fn(),
 }));
 
@@ -48,6 +50,7 @@ function context(): TrpcContext {
 describe("protected Kinfolk router workflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbMocks.getRetryableRoomMessages.mockResolvedValue([]);
   });
 
   it("creates a family with a normalized private home slug", async () => {
@@ -118,7 +121,7 @@ describe("protected Kinfolk router workflows", () => {
     dbMocks.storeRelayedMessage.mockResolvedValue({ stored: true, messageId: 40 });
     const caller = appRouter.createCaller(context());
 
-    await expect(caller.family.syncRoomFromRelay({ familyId: 22, roomId: 9 })).resolves.toEqual({ received: 1, stored: 1 });
+    await expect(caller.family.syncRoomFromRelay({ familyId: 22, roomId: 9 })).resolves.toEqual({ received: 1, stored: 1, retried: 0 });
     expect(dbMocks.storeRelayedMessage).toHaveBeenCalledWith(expect.objectContaining({ relayEventId: "relay-1", authorMemberId: 31, relayUrl: "wss://relay.nostr.africa" }));
   });
 

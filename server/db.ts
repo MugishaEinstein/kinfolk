@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, count, desc, eq, gt, isNull, ne } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
@@ -235,6 +235,33 @@ export async function createOpaqueMessage(input: { familyId: number; roomId: num
   if (!message) throw new Error("Message could not be stored");
   await db.insert(relayEvents).values({ familyId: input.familyId, messageId: message.id, nostrEventId: input.relayEventId ?? null, relayUrl: input.relayUrl ?? null, eventKind: 1, encryptedPayload: input.ciphertext, status: input.relayStatus });
   return message;
+}
+
+/** Returns encrypted messages that were saved locally but not yet accepted by the private relay. */
+export async function getRetryableRoomMessages(familyId: number, roomId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  return db.select().from(messages).where(and(
+    eq(messages.familyId, familyId),
+    eq(messages.roomId, roomId),
+    ne(messages.relayStatus, "published"),
+    isNull(messages.deletedAt),
+  )).orderBy(messages.sentAt).limit(50);
+}
+
+/** Updates the locally persisted delivery record after an explicit relay retry. */
+export async function updateMessageRelayDelivery(input: { messageId: number; relayStatus: "queued" | "published" | "failed"; relayEventId?: string; relayUrl?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(messages).set({
+    relayStatus: input.relayStatus,
+    relayEventId: input.relayEventId ?? null,
+  }).where(eq(messages.id, input.messageId));
+  await db.update(relayEvents).set({
+    status: input.relayStatus,
+    nostrEventId: input.relayEventId ?? null,
+    relayUrl: input.relayUrl ?? null,
+  }).where(eq(relayEvents.messageId, input.messageId));
 }
 
 export async function createFamilyInvitation(input: { familyId: number; requestedByMemberId: number; inviteeName: string; inviteeEmail: string; membershipType: "nuclear" | "extended" | "external"; requestedRole?: string; requiredApprovals: number }) {

@@ -15,6 +15,7 @@ export default function Chat() {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [attachmentNote, setAttachmentNote] = useState("");
+  const [deliveryNote, setDeliveryNote] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -26,21 +27,17 @@ export default function Chat() {
     { enabled: Boolean(family.data && roomId) },
   );
   const sendMessage = trpc.family.sendMessage.useMutation({
-    onSuccess: async () => {
+    onSuccess: async result => {
       setDraft("");
+      setDeliveryNote(result.relayStatus === "published" ? "Message delivered to the private relay." : "Message is safely saved in your family home. Use sync to retry private-relay delivery.");
       await roomMessages.refetch();
       await utils.family.dashboard.invalidate();
     },
   });
   const syncRelay = trpc.family.syncRoomFromRelay.useMutation({
-    onSuccess: async () => { await roomMessages.refetch(); },
+    onSuccess: async result => { setDeliveryNote(result.retried ? `${result.retried} saved message${result.retried === 1 ? "" : "s"} delivered to the private relay.` : "Private relay synchronization completed."); await roomMessages.refetch(); },
   });
   const storeAttachment = trpc.family.storeAttachment.useMutation();
-
-  useEffect(() => {
-    if (!family.data || !roomId) return;
-    void syncRelay.mutateAsync({ familyId: family.data.family.id, roomId }).catch(() => undefined);
-  }, [family.data?.family.id, roomId]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -114,9 +111,9 @@ export default function Chat() {
         <div className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-7">
           {roomMessages.isLoading ? <p className="text-xs text-[#8b958d]">Loading private messages…</p> : null}
           {roomMessages.data?.length === 0 ? <div className="grid min-h-60 place-items-center rounded-2xl border border-dashed border-[#d5ddd4] bg-[#fafcf8] p-7 text-center"><div><MessageCircle className="mx-auto text-[#75917b]" size={25} /><h2 className="mt-3 font-serif text-xl">This room is ready.</h2><p className="mt-2 max-w-xs text-xs leading-5 text-[#7b877e]">Begin the conversation. Your message will be encrypted in Kinfolk, stored in your family database, and signed for the configured private relay.</p></div></div> : null}
-          {roomMessages.data?.map(message => <article key={message.id} className={`flex max-w-[88%] gap-3 ${message.authorMemberId === membershipId ? "ml-auto flex-row-reverse" : ""}`}><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#bfd4bf] font-serif text-[10px] text-[#2f513d]">{message.authorName.slice(0, 2).toUpperCase()}</span><div className={`rounded-2xl px-4 py-3 ${message.authorMemberId === membershipId ? "rounded-tr-sm bg-[#dcebd9]" : "rounded-tl-sm bg-[#f0f2ed]"}`}><div className="mb-1 flex gap-2 text-[10px] text-[#819087]"><b className="text-[#4c6355]">{message.authorName}</b><span>{new Date(message.sentAt).toLocaleString()}</span><span className={message.relayStatus === "published" ? "text-[#5f8968]" : "text-[#ad7a57]"}>{message.relayStatus === "published" ? "signed" : message.relayStatus}</span></div><p className="text-sm leading-6 text-[#334a3c]">{message.content}</p></div></article>)}
+          {roomMessages.data?.map(message => <article key={message.id} className={`flex max-w-[88%] gap-3 ${message.authorMemberId === membershipId ? "ml-auto flex-row-reverse" : ""}`}><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#bfd4bf] font-serif text-[10px] text-[#2f513d]">{message.authorName.slice(0, 2).toUpperCase()}</span><div className={`rounded-2xl px-4 py-3 ${message.authorMemberId === membershipId ? "rounded-tr-sm bg-[#dcebd9]" : "rounded-tl-sm bg-[#f0f2ed]"}`}><div className="mb-1 flex gap-2 text-[10px] text-[#819087]"><b className="text-[#4c6355]">{message.authorName}</b><span>{new Date(message.sentAt).toLocaleString()}</span><span className={message.relayStatus === "published" ? "text-[#5f8968]" : "text-[#ad7a57]"}>{message.relayStatus === "published" ? "signed" : "saved safely"}</span></div><p className="text-sm leading-6 text-[#334a3c]">{message.content}</p></div></article>)}
         </div>
-        <form onSubmit={submit} className="border-t border-[#ebebe4] p-4 sm:p-5"><div className="flex items-center gap-3 rounded-2xl border border-[#dce1d9] bg-white px-4 py-2"><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" onChange={attachFile} /><button type="button" onClick={() => fileInput.current?.click()} disabled={storeAttachment.isPending} className="grid h-9 w-9 place-items-center rounded-xl text-[#71877a] hover:bg-[#edf2ea] disabled:opacity-40" aria-label="Attach a family photo or document"><Paperclip size={17} /></button><input value={draft} onChange={event => setDraft(event.target.value)} placeholder={`Message ${activeRoom?.name ?? "this room"}`} disabled={!roomId || sendMessage.isPending} className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-[#a0a8a1]" aria-label="Private message" /><button type="submit" disabled={!draft.trim() || sendMessage.isPending || !roomId} className="grid h-9 w-9 place-items-center rounded-xl bg-[#23483a] text-white disabled:opacity-40" aria-label="Send encrypted message"><Send size={16} /></button></div>{attachmentNote ? <p className="mt-2 text-xs text-[#5d7c67]">{attachmentNote}</p> : null}{error ? <p role="alert" className="mt-2 text-xs text-[#a04f3c]">{error}</p> : null}</form>
+        <form onSubmit={submit} className="border-t border-[#ebebe4] p-4 sm:p-5"><div className="flex items-center gap-3 rounded-2xl border border-[#dce1d9] bg-white px-4 py-2"><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" onChange={attachFile} /><button type="button" onClick={() => fileInput.current?.click()} disabled={storeAttachment.isPending} className="grid h-9 w-9 place-items-center rounded-xl text-[#71877a] hover:bg-[#edf2ea] disabled:opacity-40" aria-label="Attach a family photo or document"><Paperclip size={17} /></button><input value={draft} onChange={event => setDraft(event.target.value)} placeholder={`Message ${activeRoom?.name ?? "this room"}`} disabled={!roomId || sendMessage.isPending} className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-[#a0a8a1]" aria-label="Private message" /><button type="submit" disabled={!draft.trim() || sendMessage.isPending || !roomId} className="grid h-9 w-9 place-items-center rounded-xl bg-[#23483a] text-white disabled:opacity-40" aria-label="Send encrypted message"><Send size={16} /></button></div>{deliveryNote ? <p className="mt-2 text-xs text-[#5d7c67]">{deliveryNote}</p> : null}{attachmentNote ? <p className="mt-2 text-xs text-[#5d7c67]">{attachmentNote}</p> : null}{error ? <p role="alert" className="mt-2 text-xs text-[#a04f3c]">{error}</p> : null}</form>
       </section>
     </section>
   </main>;

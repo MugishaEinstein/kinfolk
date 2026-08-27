@@ -4,7 +4,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { acceptFamilyInvitation, createFamilyInvitation, createFamilyWithFounder, createGovernanceProposal, createOpaqueMessage, decideInvitation, getCouncilMemberCount, getFamilyDashboard, getMembership, getRoomMessages, storeFamilyAttachment, storeRelayedMessage, voteOnProposal } from "./db";
+import { acceptFamilyInvitation, createFamilyInvitation, createFamilyWithFounder, createGovernanceProposal, createOpaqueMessage, decideInvitation, getCouncilMemberCount, getFamilyDashboard, getMembership, getRetryableRoomMessages, getRoomMessages, storeFamilyAttachment, storeRelayedMessage, updateMessageRelayDelivery, voteOnProposal } from "./db";
 import { approvalRequirement } from "./domain";
 import { privateRelayBoundary } from "./relayBoundary";
 import { getRelayPublisherIdentity } from "./relayBoundary";
@@ -63,16 +63,31 @@ export const appRouter = router({
       if (!membership) throw new Error("You do not have access to this family");
       const clientMessageId = nanoid(24);
       const ciphertext = encryptFamilyMessage(input.content);
-      const relayResult = await privateRelayBoundary.publish({ familyId: input.familyId, roomId: input.roomId, senderMemberId: membership.id, clientMessageId, ciphertext, encryptionScheme: "opaque", createdAt: new Date() });
+      let relayResult: Awaited<ReturnType<typeof privateRelayBoundary.publish>>;
+      try {
+        relayResult = await privateRelayBoundary.publish({ familyId: input.familyId, roomId: input.roomId, senderMemberId: membership.id, clientMessageId, ciphertext, encryptionScheme: "opaque", createdAt: new Date() });
+      } catch (error) {
+        relayResult = { status: "failed", reason: error instanceof Error ? error.message : "Relay publication failed" };
+      }
       const message = await createOpaqueMessage({ familyId: input.familyId, roomId: input.roomId, authorMemberId: membership.id, clientMessageId, ciphertext, encryptionScheme: "opaque", relayStatus: relayResult.status, relayEventId: relayResult.relayEventId, relayUrl: relayResult.relayUrl });
-      return { message, relayStatus: relayResult.status, relayEventId: relayResult.relayEventId };
+      return { message, relayStatus: relayResult.status, relayEventId: relayResult.relayEventId, deliveryNote: relayResult.reason ?? null };
     }),
     syncRoomFromRelay: protectedProcedure.input(z.object({ familyId: z.number().int().positive(), roomId: z.number().int().positive(), since: z.coerce.date().optional() })).mutation(async ({ ctx, input }) => {
       const membership = await getMembership(input.familyId, ctx.user.id);
       if (!membership) throw new Error("You do not have access to this family");
+      const retryable = await getRetryableRoomMessages(input.familyId, input.roomId);
+      const retryResults = await Promise.all(retryable.map(async message => {
+        try {
+          const delivery = await privateRelayBoundary.publish({ familyId: input.familyId, roomId: input.roomId, senderMemberId: message.authorMemberId, clientMessageId: message.clientMessageId, ciphertext: message.ciphertext, encryptionScheme: message.encryptionScheme, createdAt: message.sentAt });
+          await updateMessageRelayDelivery({ messageId: message.id, relayStatus: delivery.status, relayEventId: delivery.relayEventId, relayUrl: delivery.relayUrl });
+          return delivery.status === "published";
+        } catch {
+          return false;
+        }
+      }));
       const relayedMessages = await privateRelayBoundary.readRoom(input);
       const results = await Promise.all(relayedMessages.map(event => storeRelayedMessage({ ...event, authorMemberId: event.senderMemberId, relayUrl: process.env.VITE_NOSTR_RELAY_URL! })));
-      return { received: relayedMessages.length, stored: results.filter(result => result.stored).length };
+      return { received: relayedMessages.length, stored: results.filter(result => result.stored).length, retried: retryResults.filter(Boolean).length };
     }),
     invite: protectedProcedure.input(z.object({
       familyId: z.number().int().positive(), inviteeName: z.string().trim().min(2).max(120), inviteeEmail: z.string().trim().email(), membershipType: z.enum(["nuclear", "extended", "external"]), requestedRole: z.string().trim().max(100).optional(),
