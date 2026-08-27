@@ -12,3 +12,4 @@
 - [x] Integrate secure file-storage metadata and notification-ready application flows.
 - [x] Add automated tests for essential family-domain procedures and manually verify essential UI behaviors.
 - [x] Verify type safety, test results, desktop/mobile presentation, and create the final project checkpoint.
+- [x] Prepare a deployment guide for running Kinfolk on an Ubuntu server behind Nginx Proxy Manager.
