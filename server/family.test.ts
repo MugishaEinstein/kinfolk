@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { approvalRequirement, proposalDecision } from "./domain";
-import { privateRelayBoundary } from "./relayBoundary";
+import { getRelayPublisherIdentity } from "./relayBoundary";
 
 describe("family governance rules", () => {
   it("uses two approvals by default when two council members exist", () => {
@@ -13,15 +13,9 @@ describe("family governance rules", () => {
     expect(proposalDecision(2, 0, 2)).toBe("approved");
   });
 
-  it("keeps the initial relay boundary opaque and safely queued", async () => {
-    await expect(privateRelayBoundary.publish({
-      familyId: 1,
-      roomId: 2,
-      senderMemberId: 3,
-      ciphertext: "opaque-ciphertext-only",
-      encryptionScheme: "opaque",
-      clientMessageId: "client-event-1",
-      createdAt: new Date(),
-    })).resolves.toEqual({ status: "queued" });
+  it("derives a public publisher identity from the dedicated private relay key", () => {
+    const identity = getRelayPublisherIdentity();
+    expect(identity.relayUrl).toBe("wss://relay.nostr.africa");
+    expect(identity.pubkey).toMatch(/^[a-f0-9]{64}$/);
   });
 });

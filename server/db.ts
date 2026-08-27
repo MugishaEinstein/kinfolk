@@ -1,5 +1,5 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
-import { createHash } from "node:crypto";
+import { and, count, desc, eq, gt, isNull } from "drizzle-orm";
+import { createHash, randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   chatRooms,
@@ -15,11 +15,14 @@ import {
   memberNotifications,
   messages,
   relayEvents,
+  webauthnChallenges,
+  webauthnCredentials,
   type InsertUser,
   users,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { storagePut } from "./storage";
+import { decryptFamilyMessage } from "./messageCrypto";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -59,6 +62,58 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
+export async function createPasskeyUser(input: { displayName: string; email?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const openId = `passkey-${randomUUID()}`;
+  await db.insert(users).values({ openId, name: input.displayName, email: input.email ?? null, loginMethod: "passkey", lastSignedIn: new Date() });
+  const user = await getUserByOpenId(openId);
+  if (!user) throw new Error("Passkey account could not be created");
+  return user;
+}
+
+export async function createWebAuthnChallenge(input: { id: string; ceremony: "registration" | "authentication"; challenge: string; displayName?: string; email?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.insert(webauthnChallenges).values({ ...input, displayName: input.displayName ?? null, email: input.email ?? null, expiresAt: new Date(Date.now() + 5 * 60 * 1000) });
+}
+
+export async function consumeWebAuthnChallenge(id: string, ceremony: "registration" | "authentication") {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const result = await db.select().from(webauthnChallenges).where(and(eq(webauthnChallenges.id, id), eq(webauthnChallenges.ceremony, ceremony), isNull(webauthnChallenges.consumedAt), gt(webauthnChallenges.expiresAt, new Date()))).limit(1);
+  const challenge = result[0];
+  if (!challenge) return undefined;
+  await db.update(webauthnChallenges).set({ consumedAt: new Date() }).where(and(eq(webauthnChallenges.id, id), isNull(webauthnChallenges.consumedAt)));
+  return challenge;
+}
+
+export async function storeWebAuthnCredential(input: { userId: number; credentialId: string; publicKey: string; counter: number; transports: string[]; deviceType: string; backedUp: boolean; aaguid?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.insert(webauthnCredentials).values({ ...input, transports: input.transports, backedUp: input.backedUp ? 1 : 0, aaguid: input.aaguid ?? null });
+}
+
+export async function getWebAuthnCredentialById(credentialId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(webauthnCredentials).where(eq(webauthnCredentials.credentialId, credentialId)).limit(1);
+  return result[0];
+}
+
+export async function updateWebAuthnCredentialUse(id: number, counter: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(webauthnCredentials).set({ counter, lastUsedAt: new Date() }).where(eq(webauthnCredentials.id, id));
+}
+
 export async function getMembership(familyId: number, userId: number) {
   const db = await getDb();
   if (!db) return undefined;
@@ -68,6 +123,14 @@ export async function getMembership(familyId: number, userId: number) {
     eq(familyMembers.status, "active"),
   )).limit(1);
   return result[0];
+}
+
+export async function getCouncilMemberCount(familyId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const [council] = await db.select({ value: count() }).from(familyMembers).where(and(eq(familyMembers.familyId, familyId), eq(familyMembers.status, "active"), eq(familyMembers.role, "council")));
+  const [admins] = await db.select({ value: count() }).from(familyMembers).where(and(eq(familyMembers.familyId, familyId), eq(familyMembers.status, "active"), eq(familyMembers.role, "admin")));
+  return council.value + admins.value;
 }
 
 export async function createFamilyWithFounder(input: { userId: number; name: string; slug: string; description?: string; founderName: string }) {
@@ -119,13 +182,58 @@ export async function getFamilyDashboard(userId: number) {
   return { family: membership.family, membership: membership.member, members, relationships, rooms, pendingInvitations, openProposals, notifications, activity, latestMessages: latestMessages.reverse() };
 }
 
-export async function createOpaqueMessage(input: { familyId: number; roomId: number; authorMemberId: number; clientMessageId: string; ciphertext: string; encryptionScheme: "nip44" | "opaque" }) {
+export async function getRoomMessages(familyId: number, roomId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  await db.insert(messages).values({ ...input, relayStatus: "queued" });
+  const rows = await db.select({ message: messages, author: familyMembers })
+    .from(messages)
+    .innerJoin(familyMembers, eq(messages.authorMemberId, familyMembers.id))
+    .where(and(eq(messages.familyId, familyId), eq(messages.roomId, roomId), isNull(messages.deletedAt)))
+    .orderBy(messages.sentAt)
+    .limit(200);
+  return rows.map(({ message, author }) => ({
+    id: message.id,
+    roomId: message.roomId,
+    authorMemberId: message.authorMemberId,
+    authorName: author.displayName,
+    authorPhotoUrl: author.photoUrl,
+    content: decryptFamilyMessage(message.ciphertext),
+    relayStatus: message.relayStatus,
+    relayEventId: message.relayEventId,
+    sentAt: message.sentAt,
+  }));
+}
+
+export async function storeRelayedMessage(input: { relayEventId: string; familyId: number; roomId: number; authorMemberId: number; clientMessageId: string; ciphertext: string; encryptionScheme: "nip44" | "opaque"; createdAt: Date; relayUrl: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const [existing] = await db.select().from(messages).where(eq(messages.clientMessageId, input.clientMessageId)).limit(1);
+  if (existing) return { stored: false, messageId: existing.id };
+  const [member] = await db.select().from(familyMembers).where(and(eq(familyMembers.id, input.authorMemberId), eq(familyMembers.familyId, input.familyId), eq(familyMembers.status, "active"))).limit(1);
+  if (!member) return { stored: false, messageId: undefined };
+  await db.insert(messages).values({ familyId: input.familyId, roomId: input.roomId, authorMemberId: input.authorMemberId, clientMessageId: input.clientMessageId, ciphertext: input.ciphertext, encryptionScheme: input.encryptionScheme, relayStatus: "published", relayEventId: input.relayEventId, sentAt: input.createdAt });
+  const [message] = await db.select().from(messages).where(eq(messages.clientMessageId, input.clientMessageId)).limit(1);
+  if (!message) throw new Error("Relayed message could not be stored");
+  await db.insert(relayEvents).values({ familyId: input.familyId, messageId: message.id, nostrEventId: input.relayEventId, relayUrl: input.relayUrl, eventKind: 1, encryptedPayload: input.ciphertext, status: "published" });
+  return { stored: true, messageId: message.id };
+}
+
+export async function createOpaqueMessage(input: { familyId: number; roomId: number; authorMemberId: number; clientMessageId: string; ciphertext: string; encryptionScheme: "nip44" | "opaque"; relayStatus: "queued" | "published" | "failed"; relayEventId?: string; relayUrl?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.insert(messages).values({
+    familyId: input.familyId,
+    roomId: input.roomId,
+    authorMemberId: input.authorMemberId,
+    clientMessageId: input.clientMessageId,
+    ciphertext: input.ciphertext,
+    encryptionScheme: input.encryptionScheme,
+    relayStatus: input.relayStatus,
+    relayEventId: input.relayEventId ?? null,
+  });
   const [message] = await db.select().from(messages).where(eq(messages.clientMessageId, input.clientMessageId)).limit(1);
   if (!message) throw new Error("Message could not be stored");
-  await db.insert(relayEvents).values({ familyId: input.familyId, messageId: message.id, eventKind: 14, encryptedPayload: input.ciphertext, status: "queued" });
+  await db.insert(relayEvents).values({ familyId: input.familyId, messageId: message.id, nostrEventId: input.relayEventId ?? null, relayUrl: input.relayUrl ?? null, eventKind: 1, encryptedPayload: input.ciphertext, status: input.relayStatus });
   return message;
 }
 
@@ -153,6 +261,21 @@ export async function createFamilyInvitation(input: { familyId: number; requeste
   return { invitation, invitationToken };
 }
 
+export async function acceptFamilyInvitation(input: { invitationToken: string; userId: number; displayName: string; email?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const tokenDigest = createHash("sha256").update(input.invitationToken).digest("hex");
+  const [invitation] = await db.select().from(invitations).where(and(eq(invitations.tokenDigest, tokenDigest), gt(invitations.expiresAt, new Date()))).limit(1);
+  if (!invitation || invitation.status === "rejected" || invitation.status === "expired") throw new Error("This invitation is not available");
+  await db.insert(familyMembers).values({ familyId: invitation.familyId, userId: input.userId, displayName: input.displayName, email: input.email ?? invitation.inviteeEmail, membershipType: invitation.membershipType, relationshipLabel: invitation.requestedRole ?? null, status: "pending" }).onDuplicateKeyUpdate({ set: { displayName: input.displayName, email: input.email ?? invitation.inviteeEmail, status: "pending" } });
+  await db.update(invitations).set({ acceptedUserId: input.userId, status: "pending_approval" }).where(eq(invitations.id, invitation.id));
+  const council = await db.select().from(familyMembers).where(and(eq(familyMembers.familyId, invitation.familyId), eq(familyMembers.status, "active")));
+  const notifications = council.filter(member => member.id !== invitation.requestedByMemberId && ["admin", "council"].includes(member.role)).map(member => ({ familyId: invitation.familyId, memberId: member.id, type: "invitation" as const, title: "A membership request needs your acknowledgement", body: `${input.displayName} accepted a private family invitation.`, targetPath: "/" }));
+  if (notifications.length) await db.insert(memberNotifications).values(notifications);
+  await db.insert(familyActivity).values({ familyId: invitation.familyId, actorMemberId: null, type: "invitation_accepted", message: `${input.displayName} accepted a private family invitation.` });
+  return { familyId: invitation.familyId, invitationId: invitation.id, status: "pending_approval" as const };
+}
+
 export async function decideInvitation(input: { invitationId: number; memberId: number; decision: "approve" | "reject" }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
@@ -163,6 +286,9 @@ export async function decideInvitation(input: { invitationId: number; memberId: 
   const rejections = await db.select().from(invitationApprovals).where(and(eq(invitationApprovals.invitationId, invitation.id), eq(invitationApprovals.decision, "reject")));
   const status = approvals.length >= invitation.requiredApprovals ? "approved" : rejections.length >= invitation.requiredApprovals ? "rejected" : "pending_approval";
   await db.update(invitations).set({ status }).where(eq(invitations.id, invitation.id));
+  if (status === "approved" && invitation.acceptedUserId) {
+    await db.update(familyMembers).set({ status: "active" }).where(and(eq(familyMembers.familyId, invitation.familyId), eq(familyMembers.userId, invitation.acceptedUserId)));
+  }
   await db.insert(familyActivity).values({ familyId: invitation.familyId, actorMemberId: input.memberId, type: "invitation_reviewed", message: `${input.decision === "approve" ? "Acknowledged" : "Declined"} the invitation for ${invitation.inviteeName}.` });
   return { status, approvals: approvals.length, rejections: rejections.length, requiredApprovals: invitation.requiredApprovals };
 }

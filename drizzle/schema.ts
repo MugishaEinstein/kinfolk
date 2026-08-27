@@ -12,6 +12,38 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+/** Public passkey material only; fingerprint and private key data remain on the user's device. */
+export const webauthnCredentials = mysqlTable("webauthnCredentials", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  credentialId: varchar("credentialId", { length: 1024 }).notNull(),
+  publicKey: text("publicKey").notNull(),
+  counter: int("counter").default(0).notNull(),
+  transports: json("transports"),
+  deviceType: varchar("deviceType", { length: 40 }).notNull(),
+  backedUp: int("backedUp").default(0).notNull(),
+  aaguid: varchar("aaguid", { length: 64 }),
+  friendlyName: varchar("friendlyName", { length: 120 }),
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("webauthnCredentials_credential_unique").on(table.credentialId),
+  index("webauthnCredentials_user_idx").on(table.userId),
+]);
+
+/** One-time WebAuthn ceremony state; challenges expire and are marked consumed after verification. */
+export const webauthnChallenges = mysqlTable("webauthnChallenges", {
+  id: varchar("id", { length: 80 }).primaryKey(),
+  ceremony: mysqlEnum("ceremony", ["registration", "authentication"]).notNull(),
+  challenge: varchar("challenge", { length: 512 }).notNull(),
+  userId: int("userId"),
+  displayName: varchar("displayName", { length: 120 }),
+  email: varchar("email", { length: 320 }),
+  expiresAt: timestamp("expiresAt").notNull(),
+  consumedAt: timestamp("consumedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("webauthnChallenges_expires_idx").on(table.expiresAt)]);
+
 export const families = mysqlTable("families", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 120 }).notNull(),
@@ -34,6 +66,7 @@ export const familyMembers = mysqlTable("familyMembers", {
   email: varchar("email", { length: 320 }),
   photoUrl: text("photoUrl"),
   shortBio: text("shortBio"),
+  nostrPubkey: varchar("nostrPubkey", { length: 64 }),
   birthDate: timestamp("birthDate"),
   membershipType: mysqlEnum("membershipType", ["nuclear", "extended", "external"]).default("extended").notNull(),
   relationshipLabel: varchar("relationshipLabel", { length: 100 }),
@@ -98,6 +131,7 @@ export const invitations = mysqlTable("invitations", {
   id: int("id").autoincrement().primaryKey(),
   familyId: int("familyId").notNull(),
   requestedByMemberId: int("requestedByMemberId").notNull(),
+  acceptedUserId: int("acceptedUserId"),
   inviteeName: varchar("inviteeName", { length: 120 }).notNull(),
   inviteeEmail: varchar("inviteeEmail", { length: 320 }).notNull(),
   membershipType: mysqlEnum("membershipType", ["nuclear", "extended", "external"]).default("extended").notNull(),
