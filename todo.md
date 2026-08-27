@@ -25,3 +25,4 @@
 - [x] Implement authenticated Nostr subscription handling for wss://relay.nostr.africa and relay-to-database chat synchronization.
 - [x] Add real passkey-account invitation acceptance, council review, and secure attachment upload interfaces.
 - [x] Add route-level coverage for invitation acceptance, attachment authorization, encrypted message publishing, and relay-backed synchronization; verify browser access routes and protection states.
+- [x] Document the important Kinfolk pages, passkey access, membership approvals, file attachments, and private chat workflow.
